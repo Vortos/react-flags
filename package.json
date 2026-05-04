@@ -15,12 +15,12 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/vortos/react-flags.git"
+    "url": "git+https://github.com/Vortos/react-flags.git"
   },
   "bugs": {
-    "url": "https://github.com/vortos/react-flags/issues"
+    "url": "https://github.com/Vortos/react-flags/issues"
   },
-  "homepage": "https://github.com/vortos/react-flags#readme",
+  "homepage": "https://github.com/Vortos/react-flags#readme",
   "keywords": [
     "vortos",
     "react",
