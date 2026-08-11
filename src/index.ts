@@ -13,3 +13,7 @@ export type {
   FlagTargetingContext,
   VariantOptions,
 } from './types';
+
+// Request plumbing shared by the provider surface.
+export { HttpError } from './request';
+export type { HeadersInput, UnauthorizedHandler } from './request';

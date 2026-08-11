@@ -6,7 +6,13 @@ import React, {
   useState,
 } from 'react';
 import { FlagContext } from './context';
-import { fetchJson, stableSerialize } from './request';
+import {
+  fetchJson,
+  headersIdentity,
+  resolveHeaders,
+  stableSerialize,
+} from './request';
+import type { HeadersInput, UnauthorizedHandler } from './request';
 import type {
   ExposureEvent,
   FlagContextValue,
@@ -18,7 +24,16 @@ import type {
 export interface FeatureFlagProviderProps {
   endpoint?: string;
   children: React.ReactNode;
-  headers?: Record<string, string>;
+  /**
+   * Request headers. Pass a function for anything that expires: the provider polls on
+   * its own schedule, and a fixed object freezes whatever token it held at mount.
+   */
+  headers?: HeadersInput;
+  /**
+   * Called when a fetch comes back 401/403. Renew the credentials and return `true` to
+   * retry the fetch once with freshly resolved headers.
+   */
+  onUnauthorized?: UnauthorizedHandler;
   context?: FlagTargetingContext;
   contextHeaderName?: string;
   initialFlags?: string[];
@@ -71,12 +86,32 @@ export function FeatureFlagProvider({
   onExposure,
   onError,
   onUpdate,
+  onUnauthorized,
 }: FeatureFlagProviderProps) {
-  const headersKey = stableSerialize(headers);
+  const headersKey = headersIdentity(headers);
   const contextKey = stableSerialize(context ?? {});
-  const requestHeaders = useMemo(
-    () => withTargetingContext(headers, context, contextHeaderName),
+
+  // Read through refs so an interval fetch scheduled an hour ago still calls the current
+  // resolver and the current handler, without either one's identity forcing `refetch` to
+  // be rebuilt (which would restart the polling interval on every render).
+  const headersRef = useRef(headers);
+  headersRef.current = headers;
+  const onUnauthorizedRef = useRef(onUnauthorized);
+  onUnauthorizedRef.current = onUnauthorized;
+
+  // Resolved per attempt, not once at mount, so a rotated token reaches the next poll.
+  const requestHeaders = useCallback(
+    async () =>
+      withTargetingContext(
+        await resolveHeaders(headersRef.current),
+        context,
+        contextHeaderName
+      ),
     [headersKey, contextHeaderName, contextKey]
+  );
+  const handleUnauthorized = useCallback<UnauthorizedHandler>(
+    (error) => onUnauthorizedRef.current?.(error) ?? false,
+    []
   );
   const cachedState = readCachedState(cacheKey);
   const initialState = useMemo<FlagState>(() => {
@@ -141,6 +176,7 @@ export function FeatureFlagProvider({
         signal: controller.signal,
         retries,
         retryDelayMs,
+        onUnauthorized: handleUnauthorized,
       });
 
       if (!mountedRef.current || controller.signal.aborted) {
@@ -173,7 +209,15 @@ export function FeatureFlagProvider({
         error: normalized,
       }));
     }
-  }, [applyState, endpoint, onError, requestHeaders, retries, retryDelayMs]);
+  }, [
+    applyState,
+    endpoint,
+    handleUnauthorized,
+    onError,
+    requestHeaders,
+    retries,
+    retryDelayMs,
+  ]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -259,14 +303,22 @@ export function FeatureFlagProvider({
       onExposure?.(event);
 
       if (exposureEndpoint) {
-        fetch(exposureEndpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...requestHeaders,
-          },
-          body: JSON.stringify(event),
-        }).catch((error) => onError?.(normalizeError(error)));
+        // Exposure is fire-and-forget telemetry, but it still needs a live token, so
+        // resolve the headers at send time like every other request.
+        void (async () => {
+          try {
+            await fetch(exposureEndpoint, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(await requestHeaders()),
+              },
+              body: JSON.stringify(event),
+            });
+          } catch (error) {
+            onError?.(normalizeError(error));
+          }
+        })();
       }
     },
     [exposureEndpoint, onError, onExposure, requestHeaders]

@@ -253,22 +253,58 @@ Exposure events are deduplicated per flag and variant during a provider lifecycl
 ## Auth Headers
 
 Headers are part of the provider's refetch identity. If a token changes, flags refetch.
+The provider does not manage login, token storage, or token refresh. Read the access token from your app's auth/session layer and pass it as a header.
+
+For a Vortos JWT login response, the access token is returned as `token.access_token`:
+
+```tsx
+const loginResponse = await login(email, password);
+const accessToken = loginResponse.token.access_token;
+```
 
 ```tsx
 <FeatureFlagProvider
   endpoint="/api/flags"
-  headers={{ Authorization: `Bearer ${token}` }}
+  headers={{ Authorization: `Bearer ${accessToken}` }}
 >
   <Router />
 </FeatureFlagProvider>
 ```
+
+### Tokens That Expire
+
+A header object is a snapshot. The provider polls on its own schedule, so if that object
+holds a short-lived access token, every poll after the token's expiry returns 401 — and
+keeps returning 401 until something re-renders the provider with a new one. Pass a
+function instead and the provider resolves it on each attempt, picking up whatever your
+auth layer currently holds:
+
+```tsx
+<FeatureFlagProvider
+  endpoint="/api/flags"
+  headers={() => ({ Authorization: `Bearer ${getAccessToken()}` })}
+  onUnauthorized={() => silentRefresh()}
+  refreshInterval={300_000}
+>
+  <Router />
+</FeatureFlagProvider>
+```
+
+`onUnauthorized` is the backstop for the narrow case where a token expires between two
+polls: on a 401 or 403 the provider calls it once, and if it resolves `true` retries the
+request with freshly resolved headers. Return `false` when the credentials cannot be
+renewed and the original error surfaces as normal. It is asked at most once per request,
+so a handler that returns `true` without renewing costs one wasted attempt, not a loop.
+
+Errors reaching `onError` are `HttpError` instances carrying `status` whenever the server
+responded, so callers can branch on the status rather than parsing a message.
 
 ## Refreshing, Stale State, And Cache
 
 ```tsx
 <FeatureFlagProvider
   endpoint="/api/flags"
-  headers={{ Authorization: `Bearer ${token}` }}
+  headers={{ Authorization: `Bearer ${accessToken}` }}
   context={{ userId, tenantId, role, plan }}
   staleTime={30_000}
   refreshInterval={60_000}
