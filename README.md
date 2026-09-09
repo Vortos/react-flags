@@ -250,6 +250,45 @@ Or post exposure events to an endpoint:
 
 Exposure events are deduplicated per flag and variant during a provider lifecycle.
 
+### What counts as an exposure
+
+Reading a flag's value **is** the exposure — that is the event an analytics backend needs in
+order to attribute anything to a variant. So `useFlag`, `useVariant`, `useFlagState`,
+`useVariantState` and `<FeatureFlag>` all report one by default.
+
+This changed in 1.2.0. Previously every one of these defaulted to reporting *nothing*, and
+`<FeatureFlag>` reported only when the flag was **on** — so the control group never appeared
+and experiment results read as though only the treatment had users. Flags looked untouched no
+matter how much traffic they gated.
+
+Nothing is sent unless the provider was given an `exposureEndpoint` and/or an `onExposure`
+handler, so the new default cannot start unexpected network traffic on its own.
+
+Opt a read out when it genuinely is not an exposure — a debug panel listing flag states, an
+admin screen rendering someone else's configuration:
+
+```tsx
+const enabled = useFlag('new-dashboard', { trackExposure: false });
+const variant = useVariant('checkout', { default: 'control', trackExposure: false });
+<FeatureFlag name="new-dashboard" trackExposure={false}>…</FeatureFlag>
+```
+
+`useFlagPayload` is the one exception: it defaults to **off**, because a payload is remote
+configuration rather than an experiment arm and is commonly read on every render of unrelated
+UI. Pass `{ trackExposure: true }` when the payload really is the treatment.
+
+Exposures are reported from an effect, after the flag state has loaded — never during render,
+where the value is still the loading default and the user would be attributed to the wrong
+variant.
+
+### Reported variant values
+
+A multivariate flag reports its variant key. A boolean flag reports `'true'` or `'false'`,
+which is what the server reports for its own evaluations — so a flag read in the browser and
+the same flag read in a request handler produce one vocabulary rather than two. Analytics
+backends coerce these back to real booleans at their own mapping edge. `booleanVariant()` is
+exported if you need to produce the same value yourself.
+
 ## Auth Headers
 
 Headers are part of the provider's refetch identity. If a token changes, flags refetch.

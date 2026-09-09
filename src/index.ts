@@ -4,9 +4,11 @@ export { useFlag, useFlagPayload, useFlagState } from './useFlag';
 export { useVariant, useVariantState } from './useVariant';
 export { useFlagContext } from './context';
 export type { FeatureFlagProviderProps } from './FeatureFlagProvider';
-export type { FeatureFlagProps } from './FeatureFlag';
+export { booleanVariant } from './exposure';
 export type {
   ExposureEvent,
+  FeatureFlagProps,
+  FlagReadOptions,
   FlagContextValue,
   FlagResponse,
   FlagState,
